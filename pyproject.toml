@@ -1,0 +1,11 @@
+[project]
+name = "agent-deep-research"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "firecrawl>=4.12.0",
+    "huggingface-hub>=1.3.1",
+    "smolagents[mcp]>=1.22.0",
+]
