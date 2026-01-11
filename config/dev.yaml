@@ -1,0 +1,8 @@
+# Configuration for development environment
+
+# Planner Agent settings
+# HugginfFace inference providers: https://huggingface.co/inference/models
+PLANNER:
+  MODEL_ID: "moonshotai/Kimi-K2-Thinking"
+  PROVIDER: "auto"
+
