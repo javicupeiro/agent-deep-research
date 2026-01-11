@@ -1,8 +1,23 @@
 # Configuration for development environment
 
-# Planner Agent settings
 # HugginfFace inference providers: https://huggingface.co/inference/models
+
+# Planner Agent settings
 PLANNER:
   MODEL_ID: "moonshotai/Kimi-K2-Thinking"
   PROVIDER: "auto"
 
+# Splitter Agent settings
+SPLITTER:
+  MODEL_ID: "deepseek-ai/DeepSeek-V3.2-Exp"
+  PROVIDER: "novita"
+
+# Coordinator Agent settings
+COORDINATOR:
+  MODEL_ID: "MiniMaxAI/MiniMax-M1-80k"
+  PROVIDER: "novita"
+
+# Subagent settings
+SUBAGENT:
+  MODEL_ID: "MiniMaxAI/MiniMax-M1-80k"
+  PROVIDER: "novita"

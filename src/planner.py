@@ -1,22 +1,12 @@
 import os
-import yaml
-from pathlib import Path
 from huggingface_hub import InferenceClient
-from prompts import PLANNER_SYSTEM_INSTRUCTIONS
+from utils.config_loader import ConfigLoader
+from utils.prompt_loader import PromptLoader
 
-from pathlib import Path
-import yaml
-
-def load_config():
-    project_root = Path(__file__).resolve().parent.parent
-    config_path = project_root / "config" / "dev.yaml"
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = yaml.safe_load(f)
-    return config
-
+config = ConfigLoader.load()
+planner_system_instructions = PromptLoader.load("planner_system_instructions.md")
 
 def generate_research_plan(user_query: str) -> str:
-    config = load_config()
     MODEL_ID = config["PLANNER"]["MODEL_ID"]
     PROVIDER = config["PLANNER"]["PROVIDER"]
 
@@ -25,13 +15,20 @@ def generate_research_plan(user_query: str) -> str:
         provider=PROVIDER,
     )
 
-    return planner_client.chat.completions.create(
+    completion = planner_client.chat.completions.create(
         model=MODEL_ID,
         messages=[
-            {"role": "system", "content": PLANNER_SYSTEM_INSTRUCTIONS},
+            {"role": "system", "content": planner_system_instructions},
             {"role": "user", "content": user_query},
         ],
         # If you want to stream the response, set stream to True.
         # When false, the full response is returned once complete.
-        stream=True,
+        stream=False,
     )
+
+    research_plan = completion.choices[0].message.content
+
+    print("\033[93mGenerated Research Plan:\033[0m")
+    print(research_plan)
+
+    return research_plan
