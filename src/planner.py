@@ -23,7 +23,7 @@ def generate_research_plan(user_query: str) -> str:
         ],
         # If you want to stream the response, set stream to True.
         # When false, the full response is returned once complete.
-        stream=False,
+        stream=True,
     )
 
     research_plan = completion.choices[0].message.content
