@@ -4,11 +4,14 @@ from planner import generate_research_plan
 from task_splitter import split_into_subtasks
 from utils.config_loader import ConfigLoader
 from utils.prompt_loader import PromptLoader
-from smolagents import LiteLLMModel, ToolCallingAgent, MCPClient, tool, InferenceClientModel
+from smolagents import ToolCallingAgent, MCPClient, tool, InferenceClientModel, CodeAgent
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 config = ConfigLoader.load()
 coordinator_prompt_template = PromptLoader.load("coordinator_prompt_template.md")
 subagent_prompt_template = PromptLoader.load("subagent_prompt_template.md")
+synthesis_prompt_template = PromptLoader.load("synthesis_prompt_template.md")
 
 FIRECRAWL_API_KEY = os.environ["FIRECRAWL_API_KEY"]
 MCP_URL = f"https://mcp.firecrawl.dev/{FIRECRAWL_API_KEY}/v2/mcp"
@@ -23,8 +26,7 @@ def run_deep_research(user_query: str) -> str:
 
     # 1) Generate research plan
     research_plan = generate_research_plan(user_query)
-    assert isinstance(research_plan, str), type(research_plan)
-
+    
     # 2) Split into explicit subtasks
     subtasks = split_into_subtasks(research_plan)
 
