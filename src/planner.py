@@ -23,12 +23,32 @@ def generate_research_plan(user_query: str) -> str:
         ],
         # If you want to stream the response, set stream to True.
         # When false, the full response is returned once complete.
-        stream=True,
+        stream=False,
     )
 
-    research_plan = completion.choices[0].message.content
-
     print("\033[93mGenerated Research Plan:\033[0m")
-    print(research_plan)
+    #research_plan = completion.choices[0].message.content
+    research_plan = ""
+    
+    def _content(obj):
+        try:
+            return obj.choices[0].delta.content
+        except Exception:
+            try:
+                return obj.choices[0].message.content
+            except Exception:
+                return None
+
+    try:
+        for chunk in completion:
+            c = _content(chunk)
+            if c:
+                research_plan += c
+                print(c, end="")
+    except TypeError:
+        c = _content(completion)
+        if c:
+            research_plan = c
+            print(c, end="")
 
     return research_plan

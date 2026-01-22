@@ -7,17 +7,19 @@ PLANNER:
   MODEL_ID: "moonshotai/Kimi-K2-Thinking"
   PROVIDER: "auto"
 
-# Splitter Agent settings
+# Splitter Agent settings; Tools: Yes, Structured: Yes
 SPLITTER:
   MODEL_ID: "deepseek-ai/DeepSeek-V3.2-Exp"
   PROVIDER: "novita"
 
-# Coordinator Agent settings
+# Coordinator Agent settings; Tools: Yes, Structured: Yes
 COORDINATOR:
-  MODEL_ID: "MiniMaxAI/MiniMax-M1-80k"
+  MODEL_ID: "openai/gpt-oss-120b"
+  #MODEL_ID: "MiniMaxAI/MiniMax-M1-80k"
   PROVIDER: "novita"
 
-# Subagent settings
+# Subagent settings; Tools: Yes, Structured: Yes
 SUBAGENT:
-  MODEL_ID: "MiniMaxAI/MiniMax-M1-80k"
+  MODEL_ID: "openai/gpt-oss-120b"
+  #MODEL_ID: "MiniMaxAI/MiniMax-M1-80k"
   PROVIDER: "novita"

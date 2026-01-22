@@ -1,8 +1,10 @@
 import os
 from pathlib import Path
 from datetime import datetime
-from smolagents import InferenceClientModel, CodeAgent
+from smolagents import InferenceClientModel, CodeAgent, AgentGenerationError
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from typing import Any, Optional
 
 from planner import generate_research_plan
 from task_splitter import split_into_subtasks
@@ -22,6 +24,51 @@ COORDINATOR_MODEL_ID = config["COORDINATOR"]["MODEL_ID"]
 COORDINATOR_PROVIDER = config["COORDINATOR"]["PROVIDER"]
 SUBAGENT_MODEL_ID    = config["SUBAGENT"]["MODEL_ID"]
 SUBAGENT_PROVIDER    = config["SUBAGENT"]["PROVIDER"]
+
+
+def run_with_retries(agent: Any, prompt: str, max_retries: int = 3, base_delay: float = 5.0,) -> Any:
+    """
+    Run `agent.run(prompt)` with retries and exponential backoff.
+
+    Args:
+        agent: An object exposing a `run(prompt: str) -> Any` method.
+        prompt: The prompt string passed to `agent.run`.
+        max_retries: Maximum number of attempts before failing. Must be >= 1.
+        base_delay: Base delay in seconds used to compute backoff. Must be > 0.
+
+    Returns:
+        The value returned by `agent.run(prompt)` on the first successful attempt.
+
+    Raises:
+        ValueError: If `max_retries` < 1 or `base_delay` <= 0.
+        RuntimeError: If all attempts fail; the last exception is attached as the cause.
+    """
+    if max_retries < 1:
+        raise ValueError("max_retries must be >= 1")
+    if base_delay <= 0:
+        raise ValueError("base_delay must be > 0")
+
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"Attempt {attempt}/{max_retries}")
+            return agent.run(prompt)
+        except AgentGenerationError as exc:
+            last_error = exc
+
+            # Exponential backoff: base_delay * 2^(attempt-1)
+            delay_seconds = base_delay * (2 ** (attempt - 1))
+
+            if attempt < max_retries:
+                print(
+                    "Model generation failed (attempt "
+                    f"{attempt}/{max_retries}). Retrying in {delay_seconds:.1f}s..."
+                )
+                time.sleep(delay_seconds)
+
+    raise RuntimeError(f"Failed after {max_retries} attempts") from last_error
+
 
 def run_deep_research(user_query: str) -> str:
     print("Running the deep research...")
@@ -131,7 +178,13 @@ def run_deep_research(user_query: str) -> str:
         name="chief_editor",
     )
 
-    final_report = chief_editor.run(synthesis_prompt)
+    # final_report = chief_editor.run(synthesis_prompt)
+    final_report = run_with_retries(
+        agent=chief_editor,
+        prompt=synthesis_prompt,
+        max_retries=3,
+        base_delay=10,
+    )
 
     # ---- Save final report and subagent reports ------------------------
     reports_base_dir = Path("reports")
