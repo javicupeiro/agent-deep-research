@@ -1,15 +1,17 @@
 import os
-import json
+from pathlib import Path
+from datetime import datetime
+from smolagents import InferenceClientModel, CodeAgent
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from planner import generate_research_plan
 from task_splitter import split_into_subtasks
+from firecrawl_tools import search_web, scrape_url
 from utils.config_loader import ConfigLoader
 from utils.prompt_loader import PromptLoader
-from smolagents import ToolCallingAgent, MCPClient, tool, InferenceClientModel, CodeAgent
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 
 config = ConfigLoader.load()
-coordinator_prompt_template = PromptLoader.load("coordinator_prompt_template.md")
+# coordinator_prompt_template = PromptLoader.load("coordinator_prompt_template.md")
 subagent_prompt_template = PromptLoader.load("subagent_prompt_template.md")
 synthesis_prompt_template = PromptLoader.load("synthesis_prompt_template.md")
 
@@ -26,7 +28,7 @@ def run_deep_research(user_query: str) -> str:
 
     # 1) Generate research plan
     research_plan = generate_research_plan(user_query)
-    
+
     # 2) Split into explicit subtasks
     subtasks = split_into_subtasks(research_plan)
 
@@ -45,64 +47,119 @@ def run_deep_research(user_query: str) -> str:
         api_key=os.environ["HF_TOKEN"],
         provider=SUBAGENT_PROVIDER,
         )
+    
+    # Firecrawl MCP tools
+    firecrawl_tools = [search_web, scrape_url]
 
-    with MCPClient({"url": MCP_URL, "transport": "streamable-http"}) as mcp_tools:
+    # ---- Run single subagent (for concurrent execution) ----------------
+    def run_subagent(subtask: dict) -> dict:
+        """Run a single subagent and return its result with metadata."""
+        subtask_id = subtask["id"]
+        subtask_title = subtask["title"]
+        subtask_description = subtask["description"]
 
-        # ---- Initialize Subagent TOOL --------------------------------------
-        @tool
-        def initialize_subagent(subtask_id: str, subtask_title: str, subtask_description: str) -> str:
-            """
-           Spawn a dedicated research sub-agent for a single subtask.
+        print(f"[Subagent {subtask_id}] Starting...")
 
-            Args:
-                subtask_id (str): The unique identifier for the subtask.
-                subtask_title (str): The descriptive title of the subtask.
-                subtask_description (str): Detailed instructions for the sub-agent to perform the subtask.
-
-            The sub-agent:
-            - Has access to the Firecrawl MCP tools.
-            - Must perform deep research ONLY on this subtask.
-            - Returns a structured markdown report with:
-              - a clear heading identifying the subtask,
-              - a narrative explanation,
-              - bullet-point key findings,
-              - explicit citations / links to sources.
-            """
-            print(f"Initializing Subagent for task {subtask_id}...")
-
-            subagent = ToolCallingAgent(
-                tools=mcp_tools,                # Firecrawl MCP toolkit
-                model=subagent_model,
-                add_base_tools=False,
-                name=f"subagent_{subtask_id}",
-            )
-
-            subagent_prompt = subagent_prompt_template.format(
-                user_query=user_query,
-                research_plan=research_plan,
-                subtask_id=subtask_id,
-                subtask_title=subtask_title,
-                subtask_description=subtask_description,
-            )
-            
-            return subagent.run(subagent_prompt)
-
-        # ---- Initialize Coordinator agent ---------------------------------------------
-        coordinator = ToolCallingAgent(
-            tools=[initialize_subagent],
-            model=coordinator_model,
+        subagent = CodeAgent(
+            tools=firecrawl_tools,
+            model=subagent_model,
             add_base_tools=False,
-            name="coordinator_agent",
+            name=f"subagent_{subtask_id}",
+            # max_steps=5,
         )
 
-        # Coordinator prompt: it gets the list of subtasks and the tool
-        subtasks_json = json.dumps(subtasks, indent=2, ensure_ascii=False)
-
-        coordinator_prompt = coordinator_prompt_template.format(
+        subagent_prompt = subagent_prompt_template.format(
             user_query=user_query,
             research_plan=research_plan,
-            subtasks_json=subtasks_json,
+            subtask_id=subtask_id,
+            subtask_title=subtask_title,
+            subtask_description=subtask_description,
         )
 
-        final_report = coordinator.run(coordinator_prompt)
-        return final_report
+        result = subagent.run(subagent_prompt)
+        print(f"[Subagent {subtask_id}] Completed")
+
+        return {
+            "id": subtask_id,
+            "title": subtask_title,
+            "result": result
+        }
+
+    # ---- Run all subagents concurrently --------------------------------
+    print(f"Running {len(subtasks)} subagents concurrently...")
+    subagent_results = []
+
+    with ThreadPoolExecutor(max_workers=len(subtasks)) as executor:
+        futures = {executor.submit(run_subagent, subtask): subtask for subtask in subtasks}
+
+        for future in as_completed(futures):
+            subtask = futures[future]
+            try:
+                result = future.result()
+                subagent_results.append(result)
+            except Exception as e:
+                print(f"[Subagent {subtask['id']}] Failed: {e}")
+                subagent_results.append({
+                    "id": subtask["id"],
+                    "title": subtask["title"],
+                    "result": f"Error: {str(e)}"
+                })
+
+    # Sort results by subtask ID to maintain consistent order
+    subagent_results.sort(key=lambda x: x["id"])
+
+    # ---- Synthesize results with chief editor agent -------------------
+    print("Synthesizing results with chief editor agent...")
+
+    # Combine all subagent reports
+    combined_reports = "\n\n---\n\n".join([
+        f"## Subtask: {r['title']} (ID: {r['id']})\n\n{r['result']}"
+        for r in subagent_results
+    ])
+
+    synthesis_prompt = synthesis_prompt_template.format(
+        user_query=user_query,
+        research_plan=research_plan,
+        combined_reports=combined_reports,
+    )
+
+    # Create chief editor agent with web search tools for validation
+    chief_editor = CodeAgent(
+        tools=firecrawl_tools,
+        model=coordinator_model,
+        add_base_tools=False,
+        name="chief_editor",
+    )
+
+    final_report = chief_editor.run(synthesis_prompt)
+
+    # ---- Save final report and subagent reports ------------------------
+    reports_base_dir = Path("reports")
+    reports_base_dir.mkdir(exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_dir = reports_base_dir / timestamp
+    report_dir.mkdir(exist_ok=True)
+    
+    # Save final report
+    final_report_path = report_dir / "final_report.md"
+    with open(final_report_path, "w", encoding="utf-8") as f:
+        f.write(final_report)
+    
+    # Save subagent reports
+    subagents_dir = report_dir / "subagents"
+    subagents_dir.mkdir(exist_ok=True)
+    
+    for result in subagent_results:
+        subagent_filename = f"{result['id']}_{result['title'].replace(' ', '_').lower()}.md"
+        subagent_path = subagents_dir / subagent_filename
+        with open(subagent_path, "w", encoding="utf-8") as f:
+            f.write(f"# {result['title']}\n\n")
+            f.write(f"**Subtask ID:** {result['id']}\n\n")
+            f.write("---\n\n")
+            f.write(result['result'])
+    
+    print(f"Final report saved to: {final_report_path}")
+    print(f"Subagent reports saved to: {subagents_dir}")
+
+    return final_report
