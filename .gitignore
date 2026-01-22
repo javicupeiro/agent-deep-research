@@ -13,4 +13,6 @@ wheels/
 # Environment variables
 .env
 
+# Research result files
 research_result.md
+research_result_valencia_cuisine.md
